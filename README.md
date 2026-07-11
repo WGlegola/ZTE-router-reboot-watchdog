@@ -20,7 +20,7 @@ real tower outages. Weak signal never triggers a reboot (it can't fix RF).
 
 ```bash
 git clone <this repo> && cd ZTE-router-reboot-watchdog
-sudo ./deploy/install.sh          # installs deps, service, prompts for password
+sudo ./deploy/install.sh          # creates a .venv, installs the service, prompts for password
 journalctl -u zte-watchdog -f     # watch it
 ```
 

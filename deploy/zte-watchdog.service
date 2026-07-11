@@ -3,6 +3,8 @@ Description=ZTE MC801A connection watchdog
 After=network-online.target
 Wants=network-online.target
 
+# install.sh rewrites User= (to the installing user) and ExecStart= (to the
+# repo's .venv python). Edit both by hand if you install this unit yourself.
 [Service]
 User=wojtek
 EnvironmentFile=/etc/zte-watchdog.env
