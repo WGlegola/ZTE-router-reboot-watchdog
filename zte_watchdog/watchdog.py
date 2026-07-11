@@ -75,6 +75,13 @@ class Monitor:
         self.sleep = sleep
         self.state = WatchdogState()
         self._next_metrics = 0.0
+        self._last_fails_logged = 0
+        # Post-reboot recovery verification. The REBOOT_DEVICE AD token is
+        # inferred, not confirmed on this firmware, so a reboot that "succeeds"
+        # (HTTP 200) may actually do nothing — detect that and warn loudly.
+        self._reboot_pending = False
+        self._reboot_check_at = 0.0
+        self._saw_unreachable = False
 
     def observe(self) -> Observation:
         reachable = tcp_reachable(self.cfg.ip, 80)
@@ -83,7 +90,7 @@ class Monitor:
         if reachable:
             try:
                 ppp = self.gateway.read_health().get("ppp_status") == "ppp_connected"
-            except Exception as e:            # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
                 log.warning("health read failed: %s", e)
         return Observation(up, reachable, ppp)
 
@@ -93,8 +100,26 @@ class Monitor:
         self._next_metrics = now + self.cfg.metrics_interval
         try:
             log.info("signal: %s", Signal.from_raw(self.gateway.read_metrics()).summary())
-        except Exception as e:                # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             log.warning("metrics read failed: %s", e)
+
+    def _verify_recovery(self, obs: Observation, now: float) -> None:
+        """After a reboot + cooldown, confirm the gateway actually rebooted or the
+        internet recovered; warn if a reboot was sent but nothing changed (a likely
+        sign the REBOOT_DEVICE AD token is wrong for this firmware)."""
+        if not self._reboot_pending:
+            return
+        if not obs.gateway_reachable:
+            self._saw_unreachable = True  # the reboot is taking effect
+        if now >= self._reboot_check_at:
+            if self._saw_unreachable or obs.internet_up:
+                log.info("reboot confirmed: gateway recovered")
+            else:
+                log.warning(
+                    "reboot was sent but the gateway never went unreachable and "
+                    "internet is still down — the REBOOT_DEVICE AD token may be wrong "
+                    "for this firmware; check the reboot() response and web-UI JS")
+            self._reboot_pending = False
 
     def run(self, max_cycles: int | None = None) -> None:
         log.info("watchdog started (ip=%s interval=%ss fails=%s)",
@@ -103,20 +128,32 @@ class Monitor:
         while max_cycles is None or cycles < max_cycles:
             now = self.clock()
             obs = self.observe()
+            self._verify_recovery(obs, now)
             action = decide(self.state, obs, self.cfg, now)
             if action == Action.REBOOT:
                 log.warning("sustained hung session — rebooting gateway")
                 try:
-                    self.gateway.reboot()
-                    log.warning("reboot sent; cooling down %ss", self.cfg.cooldown)
-                except Exception as e:        # noqa: BLE001
+                    resp = self.gateway.reboot()
+                    log.warning("reboot sent (response=%s); cooling down %ss while it re-attaches",
+                                resp, self.cfg.cooldown)
+                    self._reboot_pending = True
+                    self._reboot_check_at = now + self.cfg.cooldown
+                    self._saw_unreachable = False
+                except Exception as e:  # noqa: BLE001
                     log.error("reboot failed: %s", e)
             elif action == Action.BACKOFF:
                 log.error("reboot cap reached (%s/hr) — assuming real outage, backing off",
                           self.cfg.max_reboots_per_hour)
+            elif action == Action.HEALTHY:
+                if self._last_fails_logged > 0:
+                    log.info("internet recovered")
+                    self._last_fails_logged = 0
             elif action == Action.WAIT and not obs.internet_up:
-                log.info("no internet (fails=%s/%s, ppp=%s)",
-                         self.state.consecutive_fails, self.cfg.fails, obs.ppp_connected)
+                if self.state.consecutive_fails != self._last_fails_logged:
+                    if self.state.consecutive_fails > 0:
+                        log.info("no internet (fails=%s/%s, ppp=%s)",
+                                 self.state.consecutive_fails, self.cfg.fails, obs.ppp_connected)
+                    self._last_fails_logged = self.state.consecutive_fails
             self._maybe_log_signal(now)
             cycles += 1
             if max_cycles is None or cycles < max_cycles:
