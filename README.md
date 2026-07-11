@@ -27,17 +27,22 @@ journalctl -u zte-watchdog -f     # watch it
 The admin password is read from `ZTE_PASSWORD` in `/etc/zte-watchdog.env`
 (mode 600) — it is never stored in the repo or logs.
 
-## Test everything first: `--heartbeat`
+## Supervised mode (testing / debugging): `--heartbeat`
 
 ```bash
 ZTE_PASSWORD='...' python3 -m zte_watchdog --heartbeat
 ```
 
-Prints reachability, gateway `ppp`/`modem` state, and parsed signal metrics,
-then asks `Reboot gateway now? [y/N]`. This exercises every layer — including
-the reboot path — under your eye. **Run it once to confirm the reboot actually
-works before trusting the daemon** (the `REBOOT_DEVICE` token is inferred from
-retail firmware; if it doesn't reboot, open an issue with the web-UI JS).
+Runs the **same continuous monitoring as the daemon**, but prints a live
+heartbeat each cycle (reachability, gateway `ppp`/`modem` state, and signal
+metrics) and **pauses to ask `reboot? [y/N]` only when a drop is actually
+detected** — never while things are healthy. Decline and it keeps watching,
+re-asking after the cooldown. Add `--once` to run a single cycle and exit.
+
+Use this to watch the connection and, the first time a real drop happens,
+confirm the reboot works before trusting the autonomous daemon (the
+`REBOOT_DEVICE` token is inferred from retail firmware; the daemon also warns
+if a reboot is sent but nothing recovers).
 
 ## Usage
 
@@ -45,7 +50,7 @@ retail firmware; if it doesn't reboot, open an issue with the web-UI JS).
 python3 -m zte_watchdog                 # autonomous daemon (default)
 python3 -m zte_watchdog --once          # single evaluation, then exit
 python3 -m zte_watchdog --log-signal    # daemon + log signal metrics each cycle
-python3 -m zte_watchdog --heartbeat     # interactive readout + manual reboot
+python3 -m zte_watchdog --heartbeat     # supervised: live readout, ask before reboot on drop
 ```
 
 Tune with `--interval`, `--fails`, `--cooldown`, `--max-reboots-per-hour`, or
