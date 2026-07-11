@@ -6,10 +6,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 
 from .config import load_config
 from .gateway import Gateway
-from .metrics import Signal
+from .metrics import Signal, quality
 from .watchdog import Monitor
 
 
@@ -45,21 +46,43 @@ def _confirm_reboot(prompt=input):
     return approve
 
 
+def _num(value) -> str:
+    return "n/a" if value is None else f"{value:.1f}"
+
+
+def _qual(value, kind) -> str:
+    return f"({quality(value, kind)})"
+
+
 def _heartbeat_report(cfg, gateway, out=print):
-    """Return a report(obs, now) callback that prints a live heartbeat line each
-    cycle. Reads (authenticated) signal metrics when a password is configured."""
+    """Return a report(obs, now) callback that prints one fixed-width, column-
+    aligned heartbeat line per cycle, so successive lines line up for quick
+    comparison. Reads (authenticated) signal metrics when a password is set."""
     def report(obs, now) -> None:
-        line = "heartbeat: " + "  ".join((
-            "internet=" + ("up" if obs.internet_up else "DOWN"),
-            "gateway=" + ("reachable" if obs.gateway_reachable else "unreachable"),
-            "ppp=" + ("connected" if obs.ppp_connected else "no"),
-        ))
+        cols = [
+            time.strftime("%H:%M:%S", time.localtime(now)),
+            f"internet={'up' if obs.internet_up else 'DOWN':<4}",
+            f"gw={'reachable' if obs.gateway_reachable else 'unreachable':<11}",
+            f"ppp={'connected' if obs.ppp_connected else 'no':<9}",
+        ]
         if cfg.password and obs.gateway_reachable:
             try:
-                line += "  |  " + Signal.from_raw(gateway.read_metrics()).summary()
+                s = Signal.from_raw(gateway.read_metrics())
+                if s.on_5g:
+                    rat, rsrp, rsrq, sinr = s.network_type or "5G", s.nr_rsrp, s.nr_rsrq, s.nr_sinr
+                else:
+                    rat, rsrp, rsrq, sinr = s.network_type or "LTE", s.lte_rsrp, s.lte_rsrq, s.lte_snr
+                cols += [
+                    f"net={rat:<4}",
+                    f"RSRP {_num(rsrp):>6} {_qual(rsrp, 'rsrp'):<11}",
+                    f"RSRQ {_num(rsrq):>6} {_qual(rsrq, 'rsrq'):<11}",
+                    f"SINR {_num(sinr):>6} {_qual(sinr, 'sinr'):<11}",
+                    f"band={(s.band or '?'):<11}",
+                    f"cell={s.cell_id or '?'}",
+                ]
             except Exception as e:            # noqa: BLE001
-                line += f"  |  signal read failed: {e}"
-        out(line)
+                cols.append(f"signal read failed: {e}")
+        out("  ".join(cols))
     return report
 
 

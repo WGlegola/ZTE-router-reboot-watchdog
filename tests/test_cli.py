@@ -54,3 +54,13 @@ def test_heartbeat_report_skips_signal_without_password():
     report(Observation(internet_up=False, gateway_reachable=True, ppp_connected=False), now=1.0)
     assert "internet=DOWN" in lines[0]
     assert "RSRP" not in lines[0]   # no authenticated signal read without a password
+
+
+def test_heartbeat_report_columns_are_fixed_width_aligned():
+    lines = []
+    report = _heartbeat_report(Config(password=None), FakeGateway(), out=lines.append)
+    report(Observation(True, True, True), now=1.0)      # internet=up  (short)
+    report(Observation(False, True, True), now=1.0)     # internet=DOWN (wider)
+    # fixed-width columns => later columns start at the same index on every line
+    assert lines[0].index("gw=") == lines[1].index("gw=")
+    assert lines[0].index("ppp=") == lines[1].index("ppp=")
