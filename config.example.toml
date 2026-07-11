@@ -1,0 +1,17 @@
+# Copy to config.toml and adjust. The admin password is NOT set here;
+# provide it via the ZTE_PASSWORD environment variable (systemd EnvironmentFile).
+ip = "192.168.7.1"
+
+# External host:port checks. Internet counts as "up" if ANY of them answer.
+# Raw IPs on 443/53 test that packets actually get out, independent of DNS.
+targets = ["1.1.1.1:443", "8.8.8.8:53", "9.9.9.9:443"]
+
+interval = 30                 # seconds between checks
+fails = 3                     # consecutive failed checks before a reboot
+cooldown = 300                # seconds to wait after a reboot while it re-attaches
+max_reboots_per_hour = 3      # hard cap; beyond it, assume a real outage and back off
+
+log_signal = false            # opt-in: log RSRP/RSRQ/SINR/band/cell each metrics_interval
+metrics_interval = 30         # only used when log_signal = true
+
+log_level = "INFO"
