@@ -173,3 +173,46 @@ def test_report_called_each_cycle_with_observation(monkeypatch):
                   report=lambda obs, now: seen.append((obs.internet_up, now)))
     mon.run(max_cycles=2)
     assert seen == [(True, 1), (True, 2)]
+
+
+def test_declined_reboot_reasks_after_cooldown(monkeypatch):
+    # A sustained drop the user keeps declining: prompt once, stay quiet through
+    # the cooldown, then prompt AGAIN once the cooldown expires (not every cycle).
+    import zte_watchdog.watchdog as w
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: False)
+    gw = FakeGateway({"ppp_status": "ppp_connected", "modem_main_state": "x"})
+    cfg = _cfg()
+    cfg.cooldown = 5
+    calls = {"n": 0}
+
+    def decline(obs):
+        calls["n"] += 1
+        return False
+
+    clock = iter([1, 2, 3, 9, 10, 11]).__next__   # reboot@t=3 (cooldown->8), re-reboot@t=11
+    mon = Monitor(cfg, gw, clock=clock, sleep=lambda s: None, approve=decline)
+    mon.run(max_cycles=6)
+    assert calls["n"] == 2                 # asked at the first drop and again after cooldown
+    assert gw.rebooted == 0
+    assert mon.state.reboot_times == []    # declines never count toward the cap
+
+
+def test_supervised_confirm_triggers_reboot(monkeypatch):
+    # Supervised loop: on a sustained drop, approving actually reboots and counts.
+    import zte_watchdog.watchdog as w
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: False)
+    gw = FakeGateway({"ppp_status": "ppp_connected", "modem_main_state": "x"})
+    calls = {"n": 0}
+
+    def approve(obs):
+        calls["n"] += 1
+        return True
+
+    clock = iter([1, 2, 3, 4]).__next__
+    mon = Monitor(_cfg(), gw, clock=clock, sleep=lambda s: None, approve=approve)
+    mon.run(max_cycles=3)
+    assert calls["n"] == 1
+    assert gw.rebooted == 1
+    assert mon.state.reboot_times == [3]   # an approved reboot IS counted toward the cap
