@@ -37,12 +37,13 @@ def load_config(path: str | None = None, env: dict | None = None,
                 cli: dict | None = None) -> Config:
     env = os.environ if env is None else env
     cli = cli or {}
-    valid = {f.name for f in fields(Config)}
+    # password comes only from ZTE_PASSWORD — never from a config file or CLI.
+    loadable = {f.name for f in fields(Config) if f.name != "password"}
 
     data: dict = {}
     if path:
         with open(path, "rb") as fh:
-            data.update({k: v for k, v in tomllib.load(fh).items() if k in valid})
+            data.update({k: v for k, v in tomllib.load(fh).items() if k in loadable})
 
     if env.get("ZTE_IP"):
         data["ip"] = env["ZTE_IP"]
@@ -50,7 +51,7 @@ def load_config(path: str | None = None, env: dict | None = None,
         data["password"] = env["ZTE_PASSWORD"]
 
     for k, v in cli.items():
-        if k in valid and v is not None:
+        if k in loadable and v is not None:
             data[k] = v
 
     return Config(**data)

@@ -30,3 +30,11 @@ def test_cli_none_values_are_ignored():
     cfg = load_config(env={}, cli={"fails": None, "log_signal": True})
     assert cfg.fails == 3
     assert cfg.log_signal is True
+
+
+def test_password_never_comes_from_file(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text('password = "leaked-from-file"\nip = "1.2.3.4"\n')
+    cfg = load_config(path=str(f), env={}, cli={})
+    assert cfg.password is None        # secret rule: file cannot set password
+    assert cfg.ip == "1.2.3.4"          # non-secret keys still load from file
