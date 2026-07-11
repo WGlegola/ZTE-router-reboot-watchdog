@@ -145,3 +145,31 @@ def test_no_internet_not_logged_every_cycle(monkeypatch, caplog):
     mon.run(max_cycles=10)
     # only the ramp (fails=1,2) logs "no internet"; the long cooldown does not repeat it
     assert caplog.text.count("no internet") <= cfg.fails
+
+
+def test_declined_reboot_is_not_sent_or_counted(monkeypatch):
+    import zte_watchdog.watchdog as w
+    # Sustained hung session, but the approve callback declines every reboot.
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: False)
+    gw = FakeGateway({"ppp_status": "ppp_connected", "modem_main_state": "x"})
+    cfg = _cfg()
+    clock = iter([1, 2, 3, 4]).__next__
+    mon = Monitor(cfg, gw, clock=clock, sleep=lambda s: None, approve=lambda obs: False)
+    mon.run(max_cycles=3)
+    assert gw.rebooted == 0                       # declined -> never rebooted
+    assert mon.state.reboot_times == []           # declined reboots don't count toward the cap
+    assert mon.state.cooldown_until == 3 + cfg.cooldown   # cooldown kept -> re-ask after cooldown
+
+
+def test_report_called_each_cycle_with_observation(monkeypatch):
+    import zte_watchdog.watchdog as w
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: True)
+    gw = FakeGateway({"ppp_status": "ppp_connected"})
+    seen = []
+    clock = iter([1, 2, 3]).__next__
+    mon = Monitor(_cfg(), gw, clock=clock, sleep=lambda s: None,
+                  report=lambda obs, now: seen.append((obs.internet_up, now)))
+    mon.run(max_cycles=2)
+    assert seen == [(True, 1), (True, 2)]

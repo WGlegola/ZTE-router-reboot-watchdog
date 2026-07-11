@@ -1,5 +1,6 @@
 from zte_watchdog.config import Config
-from zte_watchdog.__main__ import build_parser, heartbeat
+from zte_watchdog.watchdog import Observation
+from zte_watchdog.__main__ import build_parser, _confirm_reboot, _heartbeat_report
 
 
 class FakeGateway:
@@ -28,21 +29,28 @@ def test_parser_flags():
     assert args.fails == 2
 
 
-def test_heartbeat_reboots_on_yes(monkeypatch):
-    import zte_watchdog.__main__ as m
-    monkeypatch.setattr(m, "tcp_reachable", lambda *a, **k: True)
-    monkeypatch.setattr(m, "internet_up", lambda *a, **k: True)
-    gw = FakeGateway()
+def test_confirm_reboot_true_on_yes():
+    approve = _confirm_reboot(prompt=lambda _: "y")
+    assert approve(object()) is True
+
+
+def test_confirm_reboot_false_on_no_or_empty():
+    assert _confirm_reboot(prompt=lambda _: "n")(object()) is False
+    assert _confirm_reboot(prompt=lambda _: "")(object()) is False
+
+
+def test_heartbeat_report_prints_status_and_signal():
     lines = []
-    heartbeat(Config(password="x"), gw, prompt=lambda _: "y", out=lines.append)
-    assert gw.rebooted == 1
-    assert any("ppp_connected" in ln for ln in lines)
+    report = _heartbeat_report(Config(password="x"), FakeGateway(), out=lines.append)
+    report(Observation(internet_up=True, gateway_reachable=True, ppp_connected=True), now=1.0)
+    assert lines and "internet=up" in lines[0]
+    assert "ppp=connected" in lines[0]
+    assert "RSRP" in lines[0]   # signal appended because password set + gateway reachable
 
 
-def test_heartbeat_declines_on_no(monkeypatch):
-    import zte_watchdog.__main__ as m
-    monkeypatch.setattr(m, "tcp_reachable", lambda *a, **k: True)
-    monkeypatch.setattr(m, "internet_up", lambda *a, **k: False)
-    gw = FakeGateway()
-    heartbeat(Config(password="x"), gw, prompt=lambda _: "n", out=lambda _s: None)
-    assert gw.rebooted == 0
+def test_heartbeat_report_skips_signal_without_password():
+    lines = []
+    report = _heartbeat_report(Config(password=None), FakeGateway(), out=lines.append)
+    report(Observation(internet_up=False, gateway_reachable=True, ppp_connected=False), now=1.0)
+    assert "internet=DOWN" in lines[0]
+    assert "RSRP" not in lines[0]   # no authenticated signal read without a password

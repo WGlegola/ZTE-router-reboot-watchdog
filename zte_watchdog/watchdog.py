@@ -68,11 +68,17 @@ def decide(state: WatchdogState, obs: Observation, cfg, now: float) -> Action:
 
 
 class Monitor:
-    def __init__(self, cfg, gateway, clock=time.time, sleep=time.sleep):
+    def __init__(self, cfg, gateway, clock=time.time, sleep=time.sleep,
+                 approve=None, report=None):
         self.cfg = cfg
         self.gateway = gateway
         self.clock = clock
         self.sleep = sleep
+        # approve(obs) -> bool gates each reboot; the default auto-approves (the
+        # autonomous daemon). Supervised --heartbeat injects a y/N prompt here.
+        # report(obs, now) is an optional per-cycle live display (--heartbeat).
+        self._approve = approve if approve is not None else (lambda obs: True)
+        self._report = report
         self.state = WatchdogState()
         self._next_metrics = 0.0
         self._last_fails_logged = 0
@@ -129,18 +135,29 @@ class Monitor:
             now = self.clock()
             obs = self.observe()
             self._verify_recovery(obs, now)
+            if self._report is not None:
+                self._report(obs, now)
             action = decide(self.state, obs, self.cfg, now)
             if action == Action.REBOOT:
-                log.warning("sustained hung session — rebooting gateway")
-                try:
-                    resp = self.gateway.reboot()
-                    log.warning("reboot sent (response=%s); cooling down %ss while it re-attaches",
-                                resp, self.cfg.cooldown)
-                    self._reboot_pending = True
-                    self._reboot_check_at = now + self.cfg.cooldown
-                    self._saw_unreachable = False
-                except Exception as e:  # noqa: BLE001
-                    log.error("reboot failed: %s", e)
+                if self._approve(obs):
+                    log.warning("sustained hung session — rebooting gateway")
+                    try:
+                        resp = self.gateway.reboot()
+                        log.warning("reboot sent (response=%s); cooling down %ss while it re-attaches",
+                                    resp, self.cfg.cooldown)
+                        self._reboot_pending = True
+                        self._reboot_check_at = now + self.cfg.cooldown
+                        self._saw_unreachable = False
+                    except Exception as e:  # noqa: BLE001
+                        log.error("reboot failed: %s", e)
+                else:
+                    # Declined (supervised mode): undo the cap bookkeeping decide()
+                    # recorded, but keep its cooldown so we re-ask after the cooldown
+                    # rather than nagging every cycle.
+                    if self.state.reboot_times:
+                        self.state.reboot_times.pop()
+                    log.info("reboot declined — monitoring continues "
+                             "(will re-check after %ss cooldown)", self.cfg.cooldown)
             elif action == Action.BACKOFF:
                 log.error("reboot cap reached (%s/hr) — assuming real outage, backing off",
                           self.cfg.max_reboots_per_hour)

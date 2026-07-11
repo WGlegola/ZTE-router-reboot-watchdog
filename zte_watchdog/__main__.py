@@ -1,4 +1,5 @@
-"""CLI: default runs the autonomous daemon; --heartbeat is the interactive tool."""
+"""CLI: default runs the autonomous auto-reboot daemon; --heartbeat runs a
+supervised monitor that prints a live readout and asks before rebooting."""
 
 from __future__ import annotations
 
@@ -7,7 +8,6 @@ import logging
 import sys
 
 from .config import load_config
-from .connectivity import internet_up, tcp_reachable
 from .gateway import Gateway
 from .metrics import Signal
 from .watchdog import Monitor
@@ -19,7 +19,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", help="path to config.toml")
     p.add_argument("--ip", help="gateway IP (default 192.168.7.1)")
     p.add_argument("--heartbeat", action="store_true",
-                   help="print a live readout and prompt to reboot, then exit")
+                   help="supervised mode: continuously print a live readout and "
+                        "prompt before rebooting, only when a drop is detected")
     p.add_argument("--log-signal", dest="log_signal", action="store_true", default=None,
                    help="daemon: also log signal metrics each cycle (opt-in)")
     p.add_argument("--once", action="store_true",
@@ -36,32 +37,30 @@ def _cli_overrides(args) -> dict:
     return {k: getattr(args, k) for k in keys}
 
 
-def heartbeat(cfg, gateway, prompt=input, out=print) -> None:
-    reachable = tcp_reachable(cfg.ip, 80)
-    out(f"gateway {cfg.ip} web UI reachable: {reachable}")
-    for host, port in cfg.parsed_targets:
-        out(f"  reach {host}:{port} -> {tcp_reachable(host, port)}")
-    out(f"internet_up (any target): {internet_up(cfg.parsed_targets)}")
-    if reachable:
-        try:
-            h = gateway.read_health()
-            out(f"gateway health: ppp={h.get('ppp_status')} modem={h.get('modem_main_state')}")
-        except Exception as e:                # noqa: BLE001
-            out(f"health read failed: {e}")
-    if cfg.password:
-        try:
-            out("signal: " + Signal.from_raw(gateway.read_metrics()).summary())
-        except Exception as e:                # noqa: BLE001
-            out(f"metrics read failed (auth?): {e}")
-    else:
-        out("signal: skipped (no ZTE_PASSWORD set)")
-    if str(prompt("Reboot gateway now? [y/N] ")).strip().lower().startswith("y"):
-        try:
-            out(f"reboot result: {gateway.reboot()}")
-        except Exception as e:                # noqa: BLE001
-            out(f"reboot failed: {e}")
-    else:
-        out("no reboot.")
+def _confirm_reboot(prompt=input):
+    """Return an approve(obs) callback that asks the user before a reboot."""
+    def approve(obs) -> bool:
+        ans = prompt("\n>>> Connection drop detected — reboot gateway now? [y/N] ")
+        return str(ans).strip().lower().startswith("y")
+    return approve
+
+
+def _heartbeat_report(cfg, gateway, out=print):
+    """Return a report(obs, now) callback that prints a live heartbeat line each
+    cycle. Reads (authenticated) signal metrics when a password is configured."""
+    def report(obs, now) -> None:
+        line = "heartbeat: " + "  ".join((
+            "internet=" + ("up" if obs.internet_up else "DOWN"),
+            "gateway=" + ("reachable" if obs.gateway_reachable else "unreachable"),
+            "ppp=" + ("connected" if obs.ppp_connected else "no"),
+        ))
+        if cfg.password and obs.gateway_reachable:
+            try:
+                line += "  |  " + Signal.from_raw(gateway.read_metrics()).summary()
+            except Exception as e:            # noqa: BLE001
+                line += f"  |  signal read failed: {e}"
+        out(line)
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -74,7 +73,12 @@ def main(argv: list[str] | None = None) -> int:
     gateway = Gateway(cfg.base_url, password=cfg.password)
 
     if args.heartbeat:
-        heartbeat(cfg, gateway)
+        print("Supervised heartbeat monitor — prints status each cycle, prompts "
+              "only when a drop is detected. Ctrl-C to stop.", flush=True)
+        monitor = Monitor(cfg, gateway,
+                          approve=_confirm_reboot(),
+                          report=_heartbeat_report(cfg, gateway))
+        monitor.run(max_cycles=1 if args.once else None)
         return 0
 
     monitor = Monitor(cfg, gateway)
