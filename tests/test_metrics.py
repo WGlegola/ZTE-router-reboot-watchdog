@@ -42,3 +42,20 @@ def test_signal_from_raw_detects_5g_when_nr_metrics_present():
     s = Signal.from_raw(raw)
     assert s.on_5g is True
     assert s.nr_rsrp == -95.0
+
+
+def test_active_reports_5g_band_when_attached():
+    raw = {"network_type": "ENDC", "Z5g_rsrp": "-95", "Z5g_SINR": "12",
+           "nr5g_action_band": "n78", "wan_active_band": "LTE BAND 7"}
+    s = Signal.from_raw(raw)
+    rat, rsrp, rsrq, sinr, band = s.active()
+    assert s.on_5g is True
+    assert (rat, rsrp, band) == ("ENDC", -95.0, "n78")   # NR band, not the LTE anchor
+    assert "n78" in s.summary()
+
+
+def test_active_reports_lte_fields_when_not_5g():
+    raw = {"network_type": "LTE", "lte_rsrp": "-109", "lte_rsrq": "-14",
+           "lte_snr": "8", "wan_active_band": "LTE BAND 7"}
+    s = Signal.from_raw(raw)
+    assert s.active() == ("LTE", -109.0, -14.0, 8.0, "LTE BAND 7")

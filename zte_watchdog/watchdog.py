@@ -82,6 +82,7 @@ class Monitor:
         self.state = WatchdogState()
         self._next_metrics = 0.0
         self._last_fails_logged = 0
+        self._backoff_logged = False
         # Post-reboot recovery verification. The REBOOT_DEVICE AD token is
         # inferred, not confirmed on this firmware, so a reboot that "succeeds"
         # (HTTP 200) may actually do nothing — detect that and warn loudly.
@@ -159,12 +160,15 @@ class Monitor:
                     log.info("reboot declined — monitoring continues "
                              "(will re-check after %ss cooldown)", self.cfg.cooldown)
             elif action == Action.BACKOFF:
-                log.error("reboot cap reached (%s/hr) — assuming real outage, backing off",
-                          self.cfg.max_reboots_per_hour)
+                if not self._backoff_logged:   # log once, not every cooldown cycle
+                    log.error("reboot cap reached (%s/hr) — assuming real outage, backing off",
+                              self.cfg.max_reboots_per_hour)
+                    self._backoff_logged = True
             elif action == Action.HEALTHY:
                 if self._last_fails_logged > 0:
                     log.info("internet recovered")
                     self._last_fails_logged = 0
+                self._backoff_logged = False   # allow a future outage to log again
             elif action == Action.WAIT and not obs.internet_up:
                 if self.state.consecutive_fails != self._last_fails_logged:
                     if self.state.consecutive_fails > 0:

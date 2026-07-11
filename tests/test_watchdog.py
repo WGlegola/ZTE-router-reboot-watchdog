@@ -216,3 +216,30 @@ def test_supervised_confirm_triggers_reboot(monkeypatch):
     assert calls["n"] == 1
     assert gw.rebooted == 1
     assert mon.state.reboot_times == [3]   # an approved reboot IS counted toward the cap
+
+
+def test_signal_logged_and_throttled_when_enabled(monkeypatch, caplog):
+    import zte_watchdog.watchdog as w
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: True)
+
+    class SignalGateway:
+        def __init__(self):
+            self.reads = 0
+        def read_health(self):
+            return {"ppp_status": "ppp_connected"}
+        def read_metrics(self):
+            self.reads += 1
+            return {"network_type": "LTE", "lte_rsrp": "-100", "wan_active_band": "LTE BAND 3"}
+
+    gw = SignalGateway()
+    cfg = _cfg()
+    cfg.log_signal = True
+    cfg.metrics_interval = 1000        # long -> logs once, then throttled
+    clock = iter([1, 2, 3]).__next__
+    mon = Monitor(cfg, gw, clock=clock, sleep=lambda s: None)
+    caplog.set_level(logging.INFO, logger="zte_watchdog")
+    mon.run(max_cycles=3)
+    assert caplog.text.count("signal:") == 1   # gated by metrics_interval
+    assert gw.reads == 1
+    assert "RSRP -100" in caplog.text

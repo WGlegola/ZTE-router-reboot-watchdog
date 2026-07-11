@@ -46,7 +46,8 @@ class Signal:
     nr_rsrp: float | None
     nr_rsrq: float | None
     nr_sinr: float | None
-    band: str | None
+    band: str | None            # LTE anchor band (wan_active_band)
+    nr_band: str | None         # 5G NR band (nr5g_action_band), when attached
     cell_id: str | None
     on_5g: bool
 
@@ -63,19 +64,27 @@ class Signal:
             nr_rsrq=parse_number(raw.get("Z5g_rsrq")),
             nr_sinr=nr_sinr,
             band=(raw.get("wan_active_band") or "").strip() or None,
+            nr_band=(raw.get("nr5g_action_band") or "").strip() or None,
             cell_id=(raw.get("cell_id") or "").strip() or None,
             # 5G is attached iff a real NR metric came back (not a sentinel).
             on_5g=nr_rsrp is not None or nr_sinr is not None,
         )
 
-    def summary(self) -> str:
+    def active(self) -> tuple:
+        """(rat_label, rsrp, rsrq, sinr, band) for the currently-attached RAT.
+        Single source of truth for which fields to display, so summary() and the
+        --heartbeat readout can't drift apart; on 5G it reports the NR band, not
+        the LTE anchor band."""
         if self.on_5g:
-            return (
-                f"net={self.network_type} 5G RSRP {self.nr_rsrp} ({quality(self.nr_rsrp, 'rsrp')}) "
-                f"SINR {self.nr_sinr} ({quality(self.nr_sinr, 'sinr')}) band={self.band} cell={self.cell_id}"
-            )
+            return (self.network_type or "5G", self.nr_rsrp, self.nr_rsrq,
+                    self.nr_sinr, self.nr_band or self.band)
+        return (self.network_type or "LTE", self.lte_rsrp, self.lte_rsrq,
+                self.lte_snr, self.band)
+
+    def summary(self) -> str:
+        rat, rsrp, rsrq, sinr, band = self.active()
         return (
-            f"net={self.network_type} LTE RSRP {self.lte_rsrp} ({quality(self.lte_rsrp, 'rsrp')}) "
-            f"RSRQ {self.lte_rsrq} ({quality(self.lte_rsrq, 'rsrq')}) "
-            f"SINR {self.lte_snr} ({quality(self.lte_snr, 'sinr')}) band={self.band} cell={self.cell_id}"
+            f"net={rat} RSRP {rsrp} ({quality(rsrp, 'rsrp')}) "
+            f"RSRQ {rsrq} ({quality(rsrq, 'rsrq')}) "
+            f"SINR {sinr} ({quality(sinr, 'sinr')}) band={band} cell={self.cell_id}"
         )

@@ -73,7 +73,7 @@ class Gateway:
             try:
                 if self._get("loginfo").get("loginfo") == "ok":
                     return
-            except Exception:
+            except Exception:  # noqa: BLE001 - any failure just falls through to a fresh login
                 pass
         self._logged_in = False
         self.login()

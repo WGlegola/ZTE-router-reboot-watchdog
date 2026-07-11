@@ -68,16 +68,13 @@ def _heartbeat_report(cfg, gateway, out=print):
         if cfg.password and obs.gateway_reachable:
             try:
                 s = Signal.from_raw(gateway.read_metrics())
-                if s.on_5g:
-                    rat, rsrp, rsrq, sinr = s.network_type or "5G", s.nr_rsrp, s.nr_rsrq, s.nr_sinr
-                else:
-                    rat, rsrp, rsrq, sinr = s.network_type or "LTE", s.lte_rsrp, s.lte_rsrq, s.lte_snr
+                rat, rsrp, rsrq, sinr, band = s.active()
                 cols += [
                     f"net={rat:<4}",
                     f"RSRP {_num(rsrp):>6} {_qual(rsrp, 'rsrp'):<11}",
                     f"RSRQ {_num(rsrq):>6} {_qual(rsrq, 'rsrq'):<11}",
                     f"SINR {_num(sinr):>6} {_qual(sinr, 'sinr'):<11}",
-                    f"band={(s.band or '?'):<11}",
+                    f"band={(band or '?'):<11}",
                     f"cell={s.cell_id or '?'}",
                 ]
             except Exception as e:            # noqa: BLE001

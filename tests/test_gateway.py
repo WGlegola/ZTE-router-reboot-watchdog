@@ -78,3 +78,25 @@ def test_reboot_computes_ad_token_and_posts_reboot_device():
     expected_ad = h.md5((a + rd).encode()).hexdigest()
     reboot_call = [c for c in sess.calls if c[0] == "POST" and c[1]["goformId"] == "REBOOT_DEVICE"][0]
     assert reboot_call[1]["AD"] == expected_ad
+
+
+def _login_posts(sess):
+    return [c for c in sess.calls if c[0] == "POST" and c[1].get("goformId") == "LOGIN"]
+
+
+def test_ensure_login_reuses_session_when_loginfo_ok():
+    sess = FakeSession({"LD": {"LD": "abc"}, "loginfo": {"loginfo": "ok"}},
+                       {"LOGIN": {"result": "0"}})
+    gw = Gateway("http://192.168.7.1", password="secret", session=sess)
+    gw.login()
+    gw.ensure_login()               # loginfo == "ok" -> must NOT log in again
+    assert len(_login_posts(sess)) == 1
+
+
+def test_ensure_login_relogins_when_session_invalid():
+    sess = FakeSession({"LD": {"LD": "abc"}, "loginfo": {"loginfo": "no"}},
+                       {"LOGIN": {"result": "0"}})
+    gw = Gateway("http://192.168.7.1", password="secret", session=sess)
+    gw.login()
+    gw.ensure_login()               # loginfo != "ok" -> re-login
+    assert len(_login_posts(sess)) == 2
