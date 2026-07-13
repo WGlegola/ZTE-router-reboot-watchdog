@@ -80,6 +80,31 @@ Set `log_level = "WARNING"` to hide the INFO chatter and keep only reboots and
 problems. Retention is journald's (systemd) — the app writes no log files of its
 own. Signal metrics are off unless you pass `--log-signal`.
 
+## Health endpoint (monitoring)
+
+Because the daemon is quiet while healthy, you can enable a read-only JSON
+endpoint to probe its liveness/state:
+
+```bash
+python3 -m zte_watchdog --health-port 8787            # localhost only
+python3 -m zte_watchdog --health-port 8787 --health-host 0.0.0.0   # allow other machines
+curl -s localhost:8787/health | jq
+```
+
+```json
+{ "status": "healthy", "seconds_since_check": 2.1, "consecutive_fails": 0,
+  "reboots_last_hour": 0, "internet_up": true, "gateway_reachable": true,
+  "ppp_connected": true, "uptime_seconds": 3600.0, "ok": true }
+```
+
+It returns **HTTP 200** while the loop is checking normally and **503 once the
+last check goes stale** (the loop is wedged) — so an uptime check catches a
+*hung* watchdog, not just a dead process. `status` is one of `healthy`,
+`degraded` (hung-session detected), `cooldown`, `backoff`, `gateway_unreachable`,
+`modem_reattaching`, `starting`. The payload contains **no secrets**. Default
+bind is `127.0.0.1`; set `--health-host 0.0.0.0` (or a config `health_host`) only
+if you want to probe it from another box (e.g. an uptime service over Tailscale).
+
 ## Remote access (CGNAT note)
 
 The gateway's WAN is CGNAT (`10.x`), so there is no inbound path from the

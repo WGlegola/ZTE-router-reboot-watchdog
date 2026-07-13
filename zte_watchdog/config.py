@@ -23,6 +23,8 @@ class Config:
     max_reboots_per_hour: int = 3
     log_signal: bool = False
     metrics_interval: int = 30
+    health_host: str = "127.0.0.1"   # bind for the HTTP health endpoint
+    health_port: int = 0             # 0 disables the health endpoint
     log_level: str = "INFO"
 
     @property

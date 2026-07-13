@@ -32,12 +32,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fails", type=int, help="consecutive fails before reboot")
     p.add_argument("--cooldown", type=int, help="seconds to wait after a reboot")
     p.add_argument("--max-reboots-per-hour", dest="max_reboots_per_hour", type=int)
+    p.add_argument("--health-port", dest="health_port", type=int,
+                   help="serve a read-only JSON /health endpoint on this port (0=off)")
+    p.add_argument("--health-host", dest="health_host",
+                   help="bind address for --health-port (default 127.0.0.1; "
+                        "use 0.0.0.0 to allow probes from other machines)")
     return p
 
 
 def _cli_overrides(args) -> dict:
     keys = ("ip", "interval", "fail_interval", "fails", "cooldown",
-            "max_reboots_per_hour", "log_signal")
+            "max_reboots_per_hour", "log_signal", "health_host", "health_port")
     return {k: getattr(args, k) for k in keys}
 
 
@@ -101,15 +106,27 @@ def main(argv: list[str] | None = None) -> int:
         monitor = Monitor(cfg, gateway,
                           approve=_confirm_reboot(),
                           report=_heartbeat_report(cfg, gateway))
-        monitor.run(max_cycles=1 if args.once else None)
-        return 0
+    else:
+        monitor = Monitor(cfg, gateway)
 
-    monitor = Monitor(cfg, gateway)
+    if cfg.health_port:
+        from .health import start_health_server
+        stale_after = max(cfg.interval * 3, 60)
+        start_health_server(monitor, cfg.health_host, cfg.health_port, stale_after)
+        logging.getLogger("zte_watchdog").info(
+            "health endpoint: http://%s:%s/health", cfg.health_host, cfg.health_port)
+
     monitor.run(max_cycles=1 if args.once else None)
     return 0
 
 
 if __name__ == "__main__":
+    import signal
+
+    def _term(*_a):        # let systemd's SIGTERM stop us as cleanly as Ctrl-C
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _term)
     try:
         sys.exit(main())
     except KeyboardInterrupt:

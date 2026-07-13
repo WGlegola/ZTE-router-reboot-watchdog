@@ -260,3 +260,34 @@ def test_uses_fail_interval_once_a_failure_is_counted(monkeypatch):
     mon.run(max_cycles=3)
     # healthy cycle sleeps at interval; once consecutive_fails>0 it uses fail_interval
     assert sleeps == [30, 5]
+
+
+def test_health_snapshot_reflects_healthy_state(monkeypatch):
+    import zte_watchdog.watchdog as w
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: True)
+    gw = FakeGateway({"ppp_status": "ppp_connected", "modem_main_state": "x"})
+    clock = iter([100, 101, 102]).__next__
+    mon = Monitor(_cfg(), gw, clock=clock, sleep=lambda s: None)
+    mon.run(max_cycles=2)
+    snap = mon.health_snapshot(now=105)
+    assert snap["status"] == "healthy"
+    assert snap["internet_up"] is True
+    assert snap["consecutive_fails"] == 0
+    assert snap["reboots_last_hour"] == 0
+    assert snap["seconds_since_check"] == 4.0    # last check ran at now=101
+    assert snap["uptime_seconds"] == 5.0         # started at now=100
+
+
+def test_health_snapshot_degraded_during_hung_session(monkeypatch):
+    import zte_watchdog.watchdog as w
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: False)
+    gw = FakeGateway({"ppp_status": "ppp_connected", "modem_main_state": "x"})
+    clock = iter([1, 2]).__next__
+    mon = Monitor(_cfg(), gw, clock=clock, sleep=lambda s: None)
+    mon.run(max_cycles=1)
+    snap = mon.health_snapshot(now=2)
+    assert snap["status"] == "degraded"          # internet down, gw up, ppp connected
+    assert snap["internet_up"] is False
+    assert snap["consecutive_fails"] == 1

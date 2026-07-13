@@ -89,6 +89,10 @@ class Monitor:
         self._reboot_pending = False
         self._reboot_check_at = 0.0
         self._saw_unreachable = False
+        # Liveness/state for the optional health endpoint.
+        self._started_at = 0.0
+        self._last_check = 0.0
+        self._last_obs = None
 
     def observe(self) -> Observation:
         reachable = tcp_reachable(self.cfg.ip, 80)
@@ -136,13 +140,56 @@ class Monitor:
             return min(self.cfg.fail_interval, self.cfg.interval)
         return self.cfg.interval
 
+    def _status_label(self, now: float) -> str:
+        s = self.state
+        if now < s.cooldown_until:
+            return "cooldown"
+        if self._backoff_logged:
+            return "backoff"
+        obs = self._last_obs
+        if obs is None:
+            return "starting"
+        if obs.internet_up:
+            return "healthy"
+        if not obs.gateway_reachable:
+            return "gateway_unreachable"
+        if not obs.ppp_connected:
+            return "modem_reattaching"
+        return "degraded"   # internet down while gateway reachable + ppp connected
+
+    def health_snapshot(self, now: float | None = None) -> dict:
+        """A JSON-serializable view of current state (no secrets). A growing
+        `seconds_since_check` means the loop is wedged."""
+        now = self.clock() if now is None else now
+        s = self.state
+        recent = [t for t in s.reboot_times if now - t <= _HOUR]
+        obs = self._last_obs
+        return {
+            "status": self._status_label(now),
+            "seconds_since_check": round(now - self._last_check, 1) if self._last_check else None,
+            "consecutive_fails": s.consecutive_fails,
+            "fails_threshold": self.cfg.fails,
+            "reboots_last_hour": len(recent),
+            "last_reboot_epoch": s.reboot_times[-1] if s.reboot_times else None,
+            "cooldown_active": now < s.cooldown_until,
+            "reboot_pending": self._reboot_pending,
+            "internet_up": obs.internet_up if obs else None,
+            "gateway_reachable": obs.gateway_reachable if obs else None,
+            "ppp_connected": obs.ppp_connected if obs else None,
+            "uptime_seconds": round(now - self._started_at, 1) if self._started_at else None,
+        }
+
     def run(self, max_cycles: int | None = None) -> None:
         log.info("watchdog started (ip=%s interval=%ss fails=%s)",
                  self.cfg.ip, self.cfg.interval, self.cfg.fails)
         cycles = 0
         while max_cycles is None or cycles < max_cycles:
             now = self.clock()
+            if not self._started_at:
+                self._started_at = now
             obs = self.observe()
+            self._last_check = now
+            self._last_obs = obs
             self._verify_recovery(obs, now)
             if self._report is not None:
                 self._report(obs, now)
