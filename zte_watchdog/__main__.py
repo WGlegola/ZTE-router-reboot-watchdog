@@ -8,6 +8,7 @@ import logging
 import sys
 import time
 
+from . import notify as sd
 from .config import load_config
 from .gateway import Gateway
 from .metrics import Signal, quality
@@ -105,9 +106,10 @@ def main(argv: list[str] | None = None) -> int:
               "only when a drop is detected. Ctrl-C to stop.", flush=True)
         monitor = Monitor(cfg, gateway,
                           approve=_confirm_reboot(),
-                          report=_heartbeat_report(cfg, gateway))
+                          report=_heartbeat_report(cfg, gateway),
+                          notify=sd.watchdog)
     else:
-        monitor = Monitor(cfg, gateway)
+        monitor = Monitor(cfg, gateway, notify=sd.watchdog)
 
     server = None
     if cfg.health_port:
@@ -120,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger("zte_watchdog").info(
             "health endpoint: http://%s:%s/health", cfg.health_host, cfg.health_port)
 
+    sd.ready("watchdog started")   # systemd Type=notify: mark started (no-op otherwise)
     try:
         monitor.run(max_cycles=1 if args.once else None)
     finally:

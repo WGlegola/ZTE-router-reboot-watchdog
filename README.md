@@ -105,6 +105,16 @@ last check goes stale** (the loop is wedged) — so an uptime check catches a
 bind is `127.0.0.1`; set `--health-host 0.0.0.0` (or a config `health_host`) only
 if you want to probe it from another box (e.g. an uptime service over Tailscale).
 
+## Self-healing (systemd watchdog)
+
+The unit uses `Type=notify` + `WatchdogSec=120`: the loop pings systemd each
+cycle, so if it ever *wedges* (not just crashes), systemd kills and restarts it
+automatically — no external monitor needed. The current state also shows live in
+`systemctl status` (a `Status: "healthy"` / `"degraded"` / … line). If you raise
+`interval` substantially, raise `WatchdogSec` to stay above ~2× it. Running the
+daemon by hand (no systemd) is unaffected — the notifications are a no-op without
+`$NOTIFY_SOCKET`.
+
 ## Remote access (CGNAT note)
 
 The gateway's WAN is CGNAT (`10.x`), so there is no inbound path from the

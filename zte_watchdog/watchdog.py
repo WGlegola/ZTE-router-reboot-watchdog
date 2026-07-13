@@ -69,7 +69,7 @@ def decide(state: WatchdogState, obs: Observation, cfg, now: float) -> Action:
 
 class Monitor:
     def __init__(self, cfg, gateway, clock=time.time, sleep=time.sleep,
-                 approve=None, report=None):
+                 approve=None, report=None, notify=None):
         self.cfg = cfg
         self.gateway = gateway
         self.clock = clock
@@ -77,8 +77,10 @@ class Monitor:
         # approve(obs) -> bool gates each reboot; the default auto-approves (the
         # autonomous daemon). Supervised --heartbeat injects a y/N prompt here.
         # report(obs, now) is an optional per-cycle live display (--heartbeat).
+        # notify(status) is an optional per-cycle keep-alive (systemd watchdog).
         self._approve = approve if approve is not None else (lambda obs: True)
         self._report = report
+        self._notify = notify
         self.state = WatchdogState()
         self._next_metrics = 0.0
         # Fail-count last reflected in the logs; >0 also gates the one-shot
@@ -234,6 +236,8 @@ class Monitor:
                         log.info("no internet (fails=%s/%s, ppp=%s)",
                                  self.state.consecutive_fails, self.cfg.fails, obs.ppp_connected)
                     self._last_fails_logged = self.state.consecutive_fails
+            if self._notify is not None:      # systemd watchdog keep-alive + live status
+                self._notify(self._status_label(now))
             self._maybe_log_signal(now)
             cycles += 1
             if max_cycles is None or cycles < max_cycles:

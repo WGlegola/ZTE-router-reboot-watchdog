@@ -6,6 +6,11 @@ Wants=network-online.target
 # install.sh rewrites User= (to the installing user) and ExecStart= (to the
 # repo's .venv python). Edit both by hand if you install this unit yourself.
 [Service]
+# The app sends READY=1 at startup and a WATCHDOG=1 keep-alive each loop cycle;
+# systemd kills + restarts the service (Restart=always) if the loop stops
+# pinging. Keep WatchdogSec comfortably above ~2x your check interval.
+Type=notify
+WatchdogSec=120
 User=wojtek
 EnvironmentFile=/etc/zte-watchdog.env
 ExecStart=/usr/bin/python3 -m zte_watchdog --config /etc/zte-watchdog/config.toml

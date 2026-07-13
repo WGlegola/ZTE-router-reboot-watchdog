@@ -303,3 +303,15 @@ def test_status_label_backoff_only_during_cooldown():
     assert mon._status_label(150) == "gateway_unreachable"
     mon._last_obs = Observation(internet_up=True, gateway_reachable=True, ppp_connected=True)
     assert mon._status_label(150) == "healthy"
+
+
+def test_notify_called_each_cycle_with_status(monkeypatch):
+    import zte_watchdog.watchdog as w
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: True)
+    gw = FakeGateway({"ppp_status": "ppp_connected"})
+    statuses = []
+    clock = iter([1, 2, 3]).__next__
+    mon = Monitor(_cfg(), gw, clock=clock, sleep=lambda s: None, notify=statuses.append)
+    mon.run(max_cycles=2)
+    assert statuses == ["healthy", "healthy"]   # keep-alive fired each cycle with live status
