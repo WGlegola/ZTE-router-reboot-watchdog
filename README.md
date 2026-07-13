@@ -53,8 +53,32 @@ python3 -m zte_watchdog --log-signal    # daemon + log signal metrics each cycle
 python3 -m zte_watchdog --heartbeat     # supervised: live readout, ask before reboot on drop
 ```
 
-Tune with `--interval`, `--fails`, `--cooldown`, `--max-reboots-per-hour`, or
-`config.toml` (see `config.example.toml`).
+Tune with `--interval` (calm cadence while healthy), `--fail-interval` (faster
+cadence once a failure is detected, so an outage escalates to the reboot
+threshold quickly without polling hard while up), `--fails`, `--cooldown`,
+`--max-reboots-per-hour`, or `config.toml` (see `config.example.toml`).
+
+## Logging
+
+The daemon logs one line per **state change** to stderr (captured by journald),
+and is otherwise silent while healthy — it does **not** print a line per check
+(that's `--heartbeat` only). You'll see:
+
+- `INFO no internet (fails=1/3, …)` as an outage ramps (one line per new strike),
+- `WARNING sustained hung session — rebooting gateway` + `reboot sent (response=…)`
+  on **every reboot it performs**,
+- `INFO reboot confirmed: gateway recovered` (or a `WARNING` that the reboot did
+  nothing) after the cooldown, and `INFO internet recovered` when it comes back,
+- `ERROR reboot cap reached (…/hr) — backing off` once, during a real outage.
+
+```bash
+journalctl -u zte-watchdog -f                    # live
+journalctl -u zte-watchdog | grep -iE 'reboot|outage'   # just restarts + outages
+```
+
+Set `log_level = "WARNING"` to hide the INFO chatter and keep only reboots and
+problems. Retention is journald's (systemd) — the app writes no log files of its
+own. Signal metrics are off unless you pass `--log-signal`.
 
 ## Remote access (CGNAT note)
 

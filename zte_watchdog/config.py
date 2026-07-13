@@ -17,6 +17,7 @@ class Config:
         default_factory=lambda: ["1.1.1.1:443", "8.8.8.8:53", "9.9.9.9:443"]
     )
     interval: int = 30
+    fail_interval: int = 5      # faster cadence once a failure is being counted
     fails: int = 3
     cooldown: int = 300
     max_reboots_per_hour: int = 3

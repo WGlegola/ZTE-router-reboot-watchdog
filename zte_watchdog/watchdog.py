@@ -128,6 +128,14 @@ class Monitor:
                     "for this firmware; check the reboot() response and web-UI JS")
             self._reboot_pending = False
 
+    def _interval(self) -> float:
+        """Poll faster once a failure is being counted, so a real outage escalates
+        to the reboot threshold quickly without spamming (or hammering) while
+        healthy. Never slower than the normal interval."""
+        if self.state.consecutive_fails > 0:
+            return min(self.cfg.fail_interval, self.cfg.interval)
+        return self.cfg.interval
+
     def run(self, max_cycles: int | None = None) -> None:
         log.info("watchdog started (ip=%s interval=%ss fails=%s)",
                  self.cfg.ip, self.cfg.interval, self.cfg.fails)
@@ -178,4 +186,4 @@ class Monitor:
             self._maybe_log_signal(now)
             cycles += 1
             if max_cycles is None or cycles < max_cycles:
-                self.sleep(self.cfg.interval)
+                self.sleep(self._interval())

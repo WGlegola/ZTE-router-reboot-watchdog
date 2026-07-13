@@ -6,7 +6,9 @@ ip = "192.168.7.1"
 # Raw IPs on 443/53 test that packets actually get out, independent of DNS.
 targets = ["1.1.1.1:443", "8.8.8.8:53", "9.9.9.9:443"]
 
-interval = 30                 # seconds between checks
+interval = 30                 # seconds between checks while healthy (calm cadence)
+fail_interval = 5             # faster cadence once a failure is detected, so an
+                              # outage escalates to the reboot threshold quickly
 fails = 3                     # consecutive failed checks before a reboot
 cooldown = 300                # seconds to wait after a reboot while it re-attaches
 max_reboots_per_hour = 3      # hard cap; beyond it, assume a real outage and back off

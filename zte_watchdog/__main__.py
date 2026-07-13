@@ -26,7 +26,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="daemon: also log signal metrics each cycle (opt-in)")
     p.add_argument("--once", action="store_true",
                    help="run a single monitor evaluation and exit")
-    p.add_argument("--interval", type=int, help="seconds between checks")
+    p.add_argument("--interval", type=int, help="seconds between checks while healthy")
+    p.add_argument("--fail-interval", dest="fail_interval", type=int,
+                   help="seconds between checks once a failure is detected (faster escalation)")
     p.add_argument("--fails", type=int, help="consecutive fails before reboot")
     p.add_argument("--cooldown", type=int, help="seconds to wait after a reboot")
     p.add_argument("--max-reboots-per-hour", dest="max_reboots_per_hour", type=int)
@@ -34,7 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _cli_overrides(args) -> dict:
-    keys = ("ip", "interval", "fails", "cooldown", "max_reboots_per_hour", "log_signal")
+    keys = ("ip", "interval", "fail_interval", "fails", "cooldown",
+            "max_reboots_per_hour", "log_signal")
     return {k: getattr(args, k) for k in keys}
 
 

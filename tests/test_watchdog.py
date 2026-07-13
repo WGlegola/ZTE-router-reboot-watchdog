@@ -243,3 +243,20 @@ def test_signal_logged_and_throttled_when_enabled(monkeypatch, caplog):
     assert caplog.text.count("signal:") == 1   # gated by metrics_interval
     assert gw.reads == 1
     assert "RSRP -100" in caplog.text
+
+
+def test_uses_fail_interval_once_a_failure_is_counted(monkeypatch):
+    import zte_watchdog.watchdog as w
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    ups = iter([True, False, False]).__next__      # healthy, then two failures
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: ups())
+    gw = FakeGateway({"ppp_status": "ppp_connected", "modem_main_state": "x"})
+    cfg = _cfg()
+    cfg.interval = 30
+    cfg.fail_interval = 5
+    sleeps = []
+    clock = iter([1, 2, 3]).__next__
+    mon = Monitor(cfg, gw, clock=clock, sleep=sleeps.append)
+    mon.run(max_cycles=3)
+    # healthy cycle sleeps at interval; once consecutive_fails>0 it uses fail_interval
+    assert sleeps == [30, 5]
