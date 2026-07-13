@@ -1,10 +1,11 @@
+import errno
 import json
 import urllib.error
 import urllib.request
 
 import pytest
 
-from zte_watchdog.health import start_health_server
+from zte_watchdog.health import is_fresh, start_health_server
 
 
 class FakeMonitor:
@@ -14,12 +15,23 @@ class FakeMonitor:
         return self._snap
 
 
+def test_is_fresh_boundary():
+    assert is_fresh({"seconds_since_check": 5.0}, 60) is True
+    assert is_fresh({"seconds_since_check": 60}, 60) is True       # inclusive
+    assert is_fresh({"seconds_since_check": 60.1}, 60) is False
+    assert is_fresh({"seconds_since_check": None}, 60) is False    # no check yet
+    assert is_fresh({}, 60) is False
+
+
 def _server(snap):
-    # Binding a loopback listen socket is denied in some sandboxes; skip there.
+    # Binding a loopback listen socket is denied in some sandboxes; skip ONLY on a
+    # permission denial — any other bind failure is a real error and must surface.
     try:
         return start_health_server(FakeMonitor(snap), "127.0.0.1", 0, stale_after=60)
-    except (PermissionError, OSError) as e:
-        pytest.skip(f"cannot bind a loopback socket here: {e}")
+    except OSError as e:
+        if e.errno in (errno.EACCES, errno.EPERM):
+            pytest.skip(f"socket bind not permitted here: {e}")
+        raise
 
 
 def _get(port):

@@ -291,3 +291,15 @@ def test_health_snapshot_degraded_during_hung_session(monkeypatch):
     assert snap["status"] == "degraded"          # internet down, gw up, ppp connected
     assert snap["internet_up"] is False
     assert snap["consecutive_fails"] == 1
+
+
+def test_status_label_backoff_only_during_cooldown():
+    mon = Monitor(_cfg(), FakeGateway({"ppp_status": "ppp_connected"}))
+    mon.state.cooldown_until = 100
+    mon._backoff_logged = True
+    mon._last_obs = Observation(internet_up=False, gateway_reachable=False, ppp_connected=False)
+    assert mon._status_label(50) == "backoff"                # inside the cooldown window
+    # once the cooldown expires it must reflect the CURRENT observation, not a stale backoff
+    assert mon._status_label(150) == "gateway_unreachable"
+    mon._last_obs = Observation(internet_up=True, gateway_reachable=True, ppp_connected=True)
+    assert mon._status_label(150) == "healthy"

@@ -81,6 +81,8 @@ class Monitor:
         self._report = report
         self.state = WatchdogState()
         self._next_metrics = 0.0
+        # Fail-count last reflected in the logs; >0 also gates the one-shot
+        # "internet recovered" line on the next HEALTHY.
         self._last_fails_logged = 0
         self._backoff_logged = False
         # Post-reboot recovery verification. The REBOOT_DEVICE AD token is
@@ -143,9 +145,10 @@ class Monitor:
     def _status_label(self, now: float) -> str:
         s = self.state
         if now < s.cooldown_until:
-            return "cooldown"
-        if self._backoff_logged:
-            return "backoff"
+            # In a wait window: distinguish a cap-triggered backoff from a normal
+            # post-reboot cooldown. The flag is only consulted DURING the window,
+            # so it can't leak a stale "backoff" once the cooldown has expired.
+            return "backoff" if self._backoff_logged else "cooldown"
         obs = self._last_obs
         if obs is None:
             return "starting"
@@ -162,7 +165,8 @@ class Monitor:
         `seconds_since_check` means the loop is wedged."""
         now = self.clock() if now is None else now
         s = self.state
-        recent = [t for t in s.reboot_times if now - t <= _HOUR]
+        reboots = list(s.reboot_times)   # snapshot once; the loop mutates this list
+        recent = [t for t in reboots if now - t <= _HOUR]
         obs = self._last_obs
         return {
             "status": self._status_label(now),
@@ -170,7 +174,7 @@ class Monitor:
             "consecutive_fails": s.consecutive_fails,
             "fails_threshold": self.cfg.fails,
             "reboots_last_hour": len(recent),
-            "last_reboot_epoch": s.reboot_times[-1] if s.reboot_times else None,
+            "last_reboot_epoch": reboots[-1] if reboots else None,
             "cooldown_active": now < s.cooldown_until,
             "reboot_pending": self._reboot_pending,
             "internet_up": obs.internet_up if obs else None,

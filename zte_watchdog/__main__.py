@@ -109,24 +109,35 @@ def main(argv: list[str] | None = None) -> int:
     else:
         monitor = Monitor(cfg, gateway)
 
+    server = None
     if cfg.health_port:
         from .health import start_health_server
+        # Consider the loop wedged after ~3 intervals without a check (min 60s):
+        # generous enough to tolerate slow cycles (login timeouts) without a
+        # false 503, tight enough to catch a genuinely hung loop.
         stale_after = max(cfg.interval * 3, 60)
-        start_health_server(monitor, cfg.health_host, cfg.health_port, stale_after)
+        server = start_health_server(monitor, cfg.health_host, cfg.health_port, stale_after)
         logging.getLogger("zte_watchdog").info(
             "health endpoint: http://%s:%s/health", cfg.health_host, cfg.health_port)
 
-    monitor.run(max_cycles=1 if args.once else None)
+    try:
+        monitor.run(max_cycles=1 if args.once else None)
+    finally:
+        if server is not None:
+            server.shutdown()
     return 0
+
+
+def _raise_keyboard_interrupt(*_args):
+    """SIGTERM handler: turn systemd's stop signal into a clean shutdown, handled
+    by the KeyboardInterrupt path below exactly like Ctrl-C."""
+    raise KeyboardInterrupt
 
 
 if __name__ == "__main__":
     import signal
 
-    def _term(*_a):        # let systemd's SIGTERM stop us as cleanly as Ctrl-C
-        raise KeyboardInterrupt
-
-    signal.signal(signal.SIGTERM, _term)
+    signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
     try:
         sys.exit(main())
     except KeyboardInterrupt:

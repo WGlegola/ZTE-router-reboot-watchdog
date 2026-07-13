@@ -13,6 +13,13 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+def is_fresh(snapshot: dict, stale_after: float) -> bool:
+    """True if the loop's last check is recent enough (→ HTTP 200); False means
+    the loop is stale/wedged or hasn't checked yet (→ HTTP 503)."""
+    secs = snapshot.get("seconds_since_check")
+    return secs is not None and secs <= stale_after
+
+
 def start_health_server(monitor, host: str, port: int, stale_after: float):
     """Start a daemon-thread HTTP server exposing monitor.health_snapshot().
     Returns the server object (call .shutdown() to stop it)."""
@@ -20,8 +27,7 @@ def start_health_server(monitor, host: str, port: int, stale_after: float):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             snap = monitor.health_snapshot()
-            secs = snap.get("seconds_since_check")
-            ok = secs is not None and secs <= stale_after
+            ok = is_fresh(snap, stale_after)
             body = json.dumps({**snap, "ok": ok}, default=str).encode()
             self.send_response(200 if ok else 503)
             self.send_header("Content-Type", "application/json")

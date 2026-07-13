@@ -51,3 +51,5 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now zte-watchdog
 
 echo "==> Done. Follow logs with: journalctl -u zte-watchdog -f"
+echo "    Optional: set health_port in /etc/zte-watchdog/config.toml for a /health endpoint,"
+echo "    then: sudo systemctl restart zte-watchdog"
