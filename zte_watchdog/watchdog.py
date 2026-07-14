@@ -119,15 +119,25 @@ class Monitor:
             log.warning("metrics read failed: %s", e)
 
     def _verify_recovery(self, obs: Observation, now: float) -> None:
-        """After a reboot + cooldown, confirm the gateway actually rebooted or the
-        internet recovered; warn if a reboot was sent but nothing changed (a likely
-        sign the REBOOT_DEVICE AD token is wrong for this firmware)."""
+        """After a reboot, confirm the gateway actually rebooted or the internet
+        recovered; warn if a reboot was sent but nothing changed (a likely sign the
+        REBOOT_DEVICE AD token is wrong for this firmware). Once recovery is
+        confirmed, end the cooldown early so a *fresh* outage right afterwards is
+        acted on promptly instead of being suppressed for the rest of the window."""
         if not self._reboot_pending:
             return
         if not obs.gateway_reachable:
             self._saw_unreachable = True  # the reboot is taking effect
+        if obs.internet_up:
+            # The router is back online, so it has finished rebooting: re-arm
+            # detection now rather than waiting out the remaining cooldown, so a
+            # second crash during the window isn't ignored until the cooldown ends.
+            log.info("reboot confirmed: internet recovered")
+            self.state.cooldown_until = now
+            self._reboot_pending = False
+            return
         if now >= self._reboot_check_at:
-            if self._saw_unreachable or obs.internet_up:
+            if self._saw_unreachable:
                 log.info("reboot confirmed: gateway recovered")
             else:
                 log.warning(

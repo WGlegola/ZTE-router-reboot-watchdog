@@ -132,6 +132,23 @@ def test_monitor_confirms_recovery_after_reboot(monkeypatch, caplog):
     assert "reboot confirmed" in caplog.text
 
 
+def test_confirmed_recovery_rearms_cooldown_for_next_outage(monkeypatch):
+    # After a reboot, once the internet is confirmed back the router has finished
+    # rebooting, so the cooldown should end early: a fresh hang right after must be
+    # rebooted on its own merits, not suppressed for the remainder of the cooldown.
+    import zte_watchdog.watchdog as w
+    monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
+    up = iter([False, False, False, True, False, False, False]).__next__
+    monkeypatch.setattr(w, "internet_up", lambda *a, **k: up())
+    gw = FakeGateway({"ppp_status": "ppp_connected", "modem_main_state": "x"})
+    cfg = _cfg()
+    cfg.cooldown = 100
+    clock = iter([1, 2, 3, 4, 5, 6, 7]).__next__   # reboot@3; recover@4; hang 5-7 -> reboot@7
+    mon = Monitor(cfg, gw, clock=clock, sleep=lambda s: None)
+    mon.run(max_cycles=7)
+    assert gw.rebooted == 2   # 2nd reboot fired at t=7, not stuck behind the 100s cooldown
+
+
 def test_no_internet_not_logged_every_cycle(monkeypatch, caplog):
     import zte_watchdog.watchdog as w
     monkeypatch.setattr(w, "tcp_reachable", lambda *a, **k: True)
